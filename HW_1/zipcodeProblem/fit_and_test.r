@@ -26,6 +26,32 @@
 # Load the Elem of stat learning library
 library("ElemStatLearn");
 
+###########################################################
+#### Funtn to find the accuracy of the prediction
+###########################################################
+calculateAccuracy <- function(predictions, actualValues){
+	correctPredictionCnt = replicate(10, 0); # 10 digits
+    totalTypes = replicate(10, 0); # 10 digits
+
+    for(index in 1:length(actualValues)){
+        predictedValue = predictions[index];
+        actualValue = actualValues[index];
+        if(predictedValue == actualValue){
+            # becoz 0 will be at index 1, 1 will be at index 2, and so on
+            correctPredictionCnt[predictedValue+1] = correctPredictionCnt[predictedValue+1] + 1;
+        }
+        totalTypes[predictedValue+1] = totalTypes[predictedValue+1] + 1;
+    }
+
+    accuracy = sum(correctPredictionCnt)/sum(totalTypes);
+	return(accuracy)
+}
+
+
+
+
+
+
 # read the training data into a data frame
 trainingData <- data.frame(zip.train);
 
@@ -87,31 +113,10 @@ testData <- subset(testData, V1 == 2 | V1 == 3);
 prediction = predict(fit, testData);
 
 predVect = as.vector(prediction);
-xValues = seq(from=1, to=length(predVec), by = 1)
+xValues = seq(from=1, to=length(predVect), by = 1)
 
 predVect[predVect < yBoundary] = 2;
 predVect[predVect >= yBoundary] = 3;
-
-###########################################################
-#### Funtn to find the accuracy of the prediction
-###########################################################
-calculateAccuracy <- function(predictions, actualValues){
-	correctPredictionCnt = replicate(10, 0); # 10 digits
-    totalTypes = replicate(10, 0); # 10 digits
-
-    for(index in 1:length(actualPredictions)){
-        predictedValue = predictions[index];
-        actualValue = actualValues[index];
-        if(predictedValue == actualValue){
-            # becoz 0 will be at index 1, 1 will be at index 2, and so on
-            correctPredictionCnt[predictedValue+1] = correctPredictionCnt[predictedValue+1] + 1;
-        }
-        totalTypes[predictedValue+1] = totalTypes[predictedValue+1] + 1;
-    }
-
-    accuracy = sum(correctPredictionCnt)/sum(totalTypes);
-	return(accuracy)
-}
 
 testSetAccuracy = calculateAccuracy(predVect, testData$V1);
 # find the accuracy
@@ -119,10 +124,15 @@ print(testSetAccuracy);
 
 trainingSetPred = predict(fit, trainingData);
 predVect = as.vector(trainingSetPred);
-xValues = seq(from=1, to=length(predVec), by = 1)
+print("Training set prediction summary(Quantitative)");
+summary(predVect);
+xValues = seq(from=1, to=length(predVect), by = 1);
 
-predVect[predVect < yBoundary] = 2;
-predVect[predVect >= yBoundary] = 3;
+jpeg("Fit result");
+plot(xValues, predVect, xlab="Counter", ylab="Dependent Variable(Training set)");
+dev.off();
+
+predVect[predVect < yBoundary] = 2; predVect[predVect >= yBoundary] = 3;
 
 trainingSetAccuracy = calculateAccuracy(predVect, trainingData$V1);
 # find the accuracy

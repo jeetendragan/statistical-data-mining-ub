@@ -1,96 +1,14 @@
-# the script takes one command line argument, if its value is READ, then it reads
-# from a previous prediction, if the file does not exist, then we throw an exception
-# if no argument is passed or 1st argument is not READ, then the script predicts
-# the model.
-
-# Load the Elem of stat learning library
-library("ElemStatLearn");
-# load class library
-require(class);
-
-args = commandArgs(trailingOnly=TRUE);
-
-print(args);
-
-PREDICT = TRUE;
-
-#if(length(args) != 0 && args[1] == "READ")
-#    PREDICT = FALSE;
-
-# read the training data into a data frame
-trainingData <- data.frame(zip.train);
-
-# get all column names
-columnNames = names(trainingData);
-
-# rename all the column names as V(#) - just as a convension(because I noticed column names changing)
-newColumnNames = {};
-count = 1;
-for (columnName in columnNames)
-{
-    newColumnNames[count] = paste("V",count, sep="");
-    count = count + 1;
-}
-# Set the new column names
-names(trainingData) = newColumnNames; 
+library(MASS);
+head(Boston);
 
 # get the feature names
-featureNames = names(trainingData)[-1];
+featureNames = names(Boston)[-1];
 
-#### Reading the test data
-# read the test data to a data frame
-testData = data.frame(zip.test);
-    
-# get all column names
-columnNames = names(testData);
+# format the feature names as '+' separated values
+formatedFeatureNames = paste(featureNames, collapse = "+");
 
-# rename all the column names as V(#) - just as a convension(because I noticed column names changing)
-newColumnNames = {};
-count = 1;
-for (columnName in columnNames)
-{
-    newColumnNames[count] = paste("V",count, sep="");
-    count = count + 1;
-}
-# Set the new column names
-names(testData) = newColumnNames;
+# build the linear model formula
+linearModelFormula = paste("crim ~ ", formatedFeatureNames, sep="");
 
-if(PREDICT){
-    k = 5;
-    set.seed(1);
-    testFeatures = subset(testData, select=-c(V1));
-    prediction <- knn(trainingData[, c(featureNames)], testFeatures, trainingData$V1, k)
-    summary(prediction);
-    #print(prediction);
-    predictionValues = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)[sapply(prediction, as.numeric)];
-    write(predictionValues, file="predictionValues.txt");
-}else{
-    dat = readLines("predictionValues.txt");
-    predictionValues = as.data.frame(dat);
-}
-#print(predictionValues);
+fit = lm(formula = linearModelFormula, data = Boston);
 
-actualTestDataValue = subset(testData, select=c(V1));
-print(actualTestDataValue);
-actualTestDataValue = as.data.frame(actualTestDataValue);
-print(length(actualTestDataValue));
-
-# find the accuracy
-correctPredictionCnt = replicate(10, 0); # 10 digits
-totalTypes = replicate(10, 0); # 10 digits
-
-for(index in 1:length(actualTestDataValue$V1)){
-    predictedValue = predictionValues[index];
-    actualValue = actualTestDataValue$V1[index];
-    if(predictedValue == actualValue){
-        # becoz 0 will be at index 1, 1 will be at index 2, and so on
-        correctPredictionCnt[predictedValue+1] = correctPredictionCnt[predictedValue+1] + 1;
-    }
-    totalTypes[predictedValue+1] = totalTypes[predictedValue+1] + 1;
-}
-
-print(correctPredictionCnt)
-print(totalTypes)
-
-accuracy = sum(correctPredictionCnt)/sum(totalTypes);
-print(accuracy);
