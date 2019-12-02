@@ -1,0 +1,354 @@
+---
+title: "InsuranceDataSet-HW2-P2"
+author: "Jeetendra Gan"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+library(leaps)
+library(gridExtra)
+library(grid)
+library(glmnet)
+src = "ticdata2000.txt"
+```
+The dimension of the complete data is:
+```{r}
+trainData <- read.table(src, sep = '\t')
+dim(trainData)
+```
+
+Here are the features in the data. V86 is the response variable, and the rest are predictors.
+```{r}
+names(trainData)
+```
+
+I have split the training data from the trcdata2000.txt file into a train set and  a test set. The training set is 75% of the total. 
+```{r}
+set.seed(123)
+trainTrainIndices <- sample(1:nrow(trainData), nrow(trainData)*0.75)
+trainTrainData <- trainData[trainTrainIndices, ]
+trainTestData<- trainData[-trainTrainIndices, ]
+```
+
+### Fit the ordinary least squares solution to the model.
+
+
+Here is the summary after fitting an ordinary least sequares solution to the model.
+```{r}
+olsFit <- lm(V86 ~ ., data = trainTrainData)
+summary(olsFit)
+```
+
+**Pass in the test data and find out the output**
+
+
+The R-Squared is very less. The poor performance of OLS on a classification problem was expected.
+
+```{r}
+pred <- predict(olsFit, data = trainTrainData)
+predTest <- predict(olsFit, newdata=trainTestData)
+```
+As this is a classification problem, there is a need to set some cap on the predicted values. After passing the training data to the model, I got a set of predicted values. This is how they span out. Firstly there aren't many observations with samples equal to 1. Secondly, the OSL model classifies a lot of true ones close to 0.3-0.4. Which is not a surprise as OLS is not optimizing on the classification, it is trying to reduce the quantitative error. 
+
+```{r}
+olsOutput <- as.data.frame(pred)
+olsOutput <- cbind(olsOutput, trainTrainData[86])
+names(olsOutput)[names(olsOutput) == 'V86'] <- 'true'
+plot(olsOutput$pred, olsOutput$true, xlab="Predictions", ylab="True values")
+```
+
+
+I ran a linear regression on the model to try to get the best value of the margin. Unfortunately the result wasn't good either. The model is as follows -
+
+**True value ~ Predicteed Value.**
+
+
+```{r}
+marginCalcFit <- lm(true ~ ., data = olsOutput)
+coef(marginCalcFit)
+```
+
+The margin fit tells us that the best fit is for a value close to 1. Graph above shows that there aren't many values that are above 1 or even close to 1 for that matter. I will not use the value of 1 as the margin. To select the value of margin/cap, I have selected 21 equally spaced values from 0 and 1. For each of these 21 values, I have computed the training error and the test error. The margin value, training misclassifications, and test misclassifications are shown in the columns 1, 2, and 3 respectively.
+
+```{r}
+#Finding the best margin
+marginValues <- seq(from = 0, to =  1, by =  0.1/2)
+trainErrors = rep(0, length(marginValues))
+testErrors = rep(0, length(marginValues))
+marginIndex = 1
+for (marginVal in marginValues) {
+  
+  trainTrainErr = 0
+  
+  # compute and record the trainTrain error for the current  marginVal
+  classification = ifelse(pred < marginVal, 0, 1)
+  trainErrors[marginIndex] = sum(abs(classification - trainTrainData[, "V86"]))
+  
+  #compute the train-test error and record it
+  classification = ifelse(predTest < marginVal, 0, 1)
+  testErrors[marginIndex] = sum(abs(classification - trainTestData[, "V86"]))
+  
+  marginIndex = marginIndex + 1
+}
+missclassificationTable <- data.frame(marginValues, trainErrors, testErrors)
+grid.table(missclassificationTable)
+plot(marginValues, trainErrors, xlab="Margin Values", ylab="Misclassifications", type="b", col="blue")
+```
+
+As can be seen from the plot above, the number of misclassifications decrease with an increase in the value of the margin upto 0.4 very quickly. After 0.4 the number of misclassifications does not change much. I have selected 0.45 as the classification margin. 
+
+**So, the number of misclassifications in the OLS solution is 273 for the training set, and 75 for the test set.**
+
+```{r}
+trainAccuracyOLS = 1-(273/nrow(trainTrainData))
+testAccuracyOLS = 1-(76/nrow(trainTestData))
+print(paste("Training accuracy: ", trainAccuracyOLS))
+print(paste("Test accuracy: ", testAccuracyOLS))
+```
+
+### Forward Subset selection
+85 subsets have been generated using forward stepwise selection. The margin is assumed to 0.45. For train and test data misclassifications have been calculated. 
+
+```{r}
+regfit.fwd = regsubsets(V86 ~ ., data = trainTrainData, nvmax = 85, method = "forward")
+plot(regfit.fwd, scale="Cp")
+fwdStSummary = summary(regfit.fwd)
+```
+The plot for CP indicates that as we add more variables to the data set, the test error may increase.
+```{r}
+#compute the misclassifications for each of the training, and test data set.
+misClassTrainFwd = rep(NA, 85)
+misClassTestFwd = rep(NA, 85)
+trainMatrix = model.matrix(V86 ~ ., trainTrainData)
+testMatrix = model.matrix(V86 ~., trainTestData)
+for(i in 1:85){
+  coefi = coef(regfit.fwd, id = i)
+  trainSubset = trainMatrix[, names(coefi)]
+  testSubset = testMatrix[, names(coefi)]
+  trainPred = trainSubset%*%coefi
+  testPred = testSubset%*%coefi
+  trainPred = ifelse(trainPred < 0.45, 0, 1)
+  testPred = ifelse(testPred < 0.45, 0, 1)
+  misClassTrainFwd[i] <- sum(abs(trainPred - trainTrainData[, "V86"]))
+  misClassTestFwd[i] <- sum(abs(testPred - trainTestData[, "V86"]))
+}
+
+trainAccuracyFwd = 1 - (misClassTrainFwd/nrow(trainTrainData))
+testAccuracyFwd = 1 -  (misClassTestFwd / nrow(trainTestData))
+
+plot(trainAccuracyFwd, ylab="Training Accuracy", pch=19, type="b")
+legend("topright", legend = c("Train"), col=c("black"), pch=19)
+plot(testAccuracyFwd, ylab="Test Accuracy", col="blue", pch = 19, type = "b")
+legend("topright", legend = c("Test"), col=c("blue"), pch=19)
+```
+The train accuracy is less than the test accuracy. But the values do not change much accross different subsets. A lot of the subsets have minimum accuracy. I have selected a model with 10 subsets as it has a high test accuracy. There is a range of values from 2 to 18 that have a heigher accuracy than the rest. Also there is a simular such peak from 42-58. But selecting a model with lower number of predictors is always better if we are getting the same accuracy. 
+
+
+### Using backward selection
+```{r}
+regfit.bkwd = regsubsets(V86 ~ ., data = trainTrainData, nvmax = 85, method = "backward")
+plot(regfit.bkwd, scale="Cp")
+
+#compute the misclassifications for each of the training, and test data set.
+misClassTrainBwd = rep(NA, 85)
+misClassTestBwd = rep(NA, 85)
+trainMatrix = model.matrix(V86 ~ ., trainTrainData)
+testMatrix = model.matrix(V86 ~., trainTestData)
+for(i in 1:85){
+  coefi = coef(regfit.bkwd, id = i)
+  trainSubset = trainMatrix[, names(coefi)]
+  testSubset = testMatrix[, names(coefi)]
+  trainPred = trainSubset%*%coefi
+  testPred = testSubset%*%coefi
+  trainPred = ifelse(trainPred < 0.45, 0, 1)
+  testPred = ifelse(testPred < 0.45, 0, 1)
+  misClassTrainBwd[i] <- sum(abs(trainPred - trainTrainData[, "V86"]))
+  misClassTestBwd[i] <- sum(abs(testPred - trainTestData[, "V86"]))
+}
+
+trainAccuracyBwd = 1 - (misClassTrainBwd/nrow(trainTrainData))
+testAccuracyBwd = 1 -  (misClassTestBwd / nrow(trainTestData))
+
+plot(trainAccuracyBwd, ylab="Training Accuracy", pch=19, type="b")
+legend("topright", legend = c("Train"), col=c("black"), pch=19)
+plot(testAccuracyBwd, ylab="Test Accuracy", col="blue", pch = 19, type = "b")
+legend("topright", legend = c("Test"), col=c("blue"), pch=19)
+```
+
+
+For backward selection, we will select the model with 10 features due to the same reasons mentioned for forward selection. 
+
+### Ridge regression
+The graph shows the penalization vs MSE obtained.
+```{r}
+trainTrainX = trainTrainData[, -which(names(trainTrainData) == "V86")]
+trainTrainY = trainTrainData[, which(names(trainTrainData) == "V86")]
+ridge.mod = glmnet(as.matrix(trainTrainX), trainTrainY, alpha = 0)
+X = as.matrix(trainTrainX)
+cvRidge = cv.glmnet(X, trainTrainY, alpha=0)
+plot(cvRidge)
+```
+The best lambda is:
+```{r}
+ridgeBestLam <- cvRidge$lambda.min
+round(ridgeBestLam, digits = 2)
+```
+```{r}
+testMatrix = as.matrix(trainTrainData[, -which(names(trainTrainData) == "V86")])
+ridge.pred2 <- predict(ridge.mod, s = ridgeBestLam, type="response", newx = testMatrix)
+trainTrainPred <- ridge.pred2
+trainTrainPred = ifelse(trainTrainPred < 0.45, 0, 1)
+misClassTrainRidge <- sum(abs(trainTrainPred - trainTrainData[, "V86"]))
+trainAccuracyRidge <- 1 - (misClassTrainRidge/nrow(trainTrainData))
+trainAccuracyRidge
+```
+
+
+The accuracy of ridge regression on test data is:
+```{r}
+testMatrix = as.matrix(trainTestData[, -which(names(trainTestData) == "V86")])
+ridge.pred2 <- predict(ridge.mod, s = ridgeBestLam, type="response", newx = testMatrix)
+trainTestPred <- ridge.pred2
+trainTestPred = ifelse(trainTestPred < 0.45, 0, 1)
+misClassTestRidge <- sum(abs(trainTestPred - trainTestData[, "V86"]))
+testAccuracyRidge <- 1 - (misClassTestRidge/nrow(trainTestData))
+testAccuracyRidge
+```
+
+
+### The LASSO
+```{r}
+lasso.mod <- glmnet(as.matrix(trainTrainX), trainTrainY, alpha = 1)
+plot(lasso.mod)
+```
+
+Graph below shows how the model performs(MSE) on the training data with increase in lambda. 
+```{r}
+cv.out = cv.glmnet(as.matrix(trainTrainX), trainTrainY, alpha = 1)
+plot(cv.out)
+```
+
+The best lambda for lasso is:
+```{r}
+lassoBestLam = cv.out$lambda.min
+lassoBestLam
+```
+
+```{r}
+predict <- predict(lasso.mod, s = lassoBestLam, type = "coefficients")
+predict
+```
+
+The train accuracy for the LASSO is:
+```{r}
+lassoPredictTrainTrain <- predict(lasso.mod, s = lassoBestLam, type = "response", newx = as.matrix(trainTrainX))
+trainTrainPred = ifelse(lassoPredictTrainTrain < 0.45, 0, 1)
+misClassTrainLasso <- sum(abs(trainTrainPred - trainTrainY))
+trainTrainAccuracyRidge <- 1 - (misClassTrainLasso / nrow(trainTrainData))
+trainTrainAccuracyRidge
+```
+The test accuracy for the lasso is:
+```{r}
+trainTestX = trainTestData[, -which(names(trainTestData) == "V86")]
+trainTestY = trainTestData[, which(names(trainTestData) == "V86")]
+lassoPredictTrainTest <- predict(lasso.mod, s = lassoBestLam, type = "response", newx = as.matrix(trainTestX))
+trainTestPred = ifelse(lassoPredictTrainTest < 0.45, 0, 1)
+misClassTestLasso <- sum(abs(trainTestPred - trainTestY))
+trainTestAccuracyRidge <- 1 - (misClassTestLasso / nrow(trainTestData))
+trainTestAccuracyRidge
+```
+
+
+### Predicting the models on the unseen data.
+
+```{r}
+src = "ticeval2000.txt"
+newPredictors <- read.table(src, sep = '\t')
+src = "tictgts2000.txt"
+response <- read.table(src, sep='\t')
+newDataComplete = data.frame(newPredictors, response)
+names(newDataComplete)[names(newDataComplete) == 'V1.1'] <- "V86"
+newDataMatrix = model.matrix(V86 ~ ., newDataComplete)
+```
+
+Data was read from the files ticeval2000.txt and tictgts2000.txt. The data set was treated as unseen and its accuracy was calculated using all the methods used so far. 
+
+There are 4000 observations in the data set.
+
+
+**Ordinary Least Squares**
+
+
+The accuracy obtained by using the ordinary least squares model is as follows:
+
+```{r}
+newDataPred <- predict(olsFit, data = newPredictors)
+newDataPred = ifelse(newDataPred < 0.45, 0, 1)
+missClasNewPred <- sum(abs(newDataPred - response))
+newDataAccuracyOLS <- 1 - (missClasNewPred / nrow(newPredictors))
+newDataAccuracyOLS
+```
+
+**Forward selection**
+We selected 10 for forward selection. So that will be used to compute the prediction accuracy on the new data. 
+
+The accuracy using forward selection is:
+```{r}
+coefi = coef(regfit.fwd, id = 10)
+newFwdPred = newDataMatrix[, names(coefi)]%*%coefi
+newFwdPred = ifelse(newFwdPred < 0.45, 0, 1)
+newMisClassFwd <- sum(abs(newFwdPred - response))
+newAccFwd <- 1 - (newMisClassFwd/nrow(newPredictors))
+newAccFwd
+```
+
+**Backward selection**
+We selected 10 predictors in backward selection as well. Here is the accuracy prodced by the model.
+
+```{r}
+coefi = coef(regfit.bkwd, id = 10)
+newBwdPred = newDataMatrix[, names(coefi)]%*%coefi
+newBwdPred = ifelse(newBwdPred < 0.45, 0, 1)
+newMisClassBwd <- sum(abs(newBwdPred - response))
+newAccBwd <- 1 - (newMisClassBwd/nrow(newPredictors))
+newAccBwd
+```
+
+**Ridge**
+Ridge has the following accuracy:
+```{r}
+testMatrix = as.matrix(newDataComplete[, -which(names(trainTestData) == "V86")])
+ridge.pred2 <- predict(ridge.mod, s = ridgeBestLam, type="response", newx = testMatrix)
+trainTestPred <- ridge.pred2
+trainTestPred = ifelse(trainTestPred < 0.45, 0, 1)
+misClassTestRidge <- sum(abs(trainTestPred - trainTestY))
+testAccuracyRidge <- 1 - (misClassTestRidge/length(trainTestY))
+testAccuracyRidge
+```
+
+**Lasso**
+Lasso has the following accuracy:
+```{r}
+trainTestX = newDataComplete[, -which(names(newDataComplete) == "V86")]
+trainTestY = newDataComplete[, which(names(newDataComplete) == "V86")]
+lassoPredictTrainTest <- predict(lasso.mod, s = lassoBestLam, type = "response", newx = as.matrix(trainTestX))
+trainTestPred = ifelse(lassoPredictTrainTest < 0.45, 0, 1)
+misClassTestLasso <- sum(abs(trainTestPred - trainTestY))
+trainTestAccuracyRidge <- 1 - (misClassTestLasso / nrow(newDataComplete))
+trainTestAccuracyRidge
+```
+
+There is not much difference between the estimates produced by each of the variables. They all roughly perform the same.
+
+**Can you predict who will be interested in buying a caravan insurance policy and give an explanation why?**
+Even the accuracy is very high the models actually do not do very well for the positive cases - i.e. does the model predict correctly when the true value is 1(person may buy a caravan insurance policy). AS the number of 0's in the data is very large, it is difficult to correctly predict the positive case.

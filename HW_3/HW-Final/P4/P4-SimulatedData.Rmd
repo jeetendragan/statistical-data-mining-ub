@@ -1,0 +1,141 @@
+---
+title: "P-4-SimulatedData"
+author: "Jeetendra Gan"
+date: "11/5/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+require(ISLR)
+require(boot)
+set.seed(1)
+x=rnorm(100)
+y = x - (2 * x^2) + rnorm(100)
+```
+The given polynomial $y = x - 2x^2 + e$ is most equivalent to $y = b_0 + b_1x + b_2x^2$
+
+Here is the simulated data as a graph:
+```{r}
+plot(x,y)
+simData = data.frame(x,y)
+totalRows = dim(simData)[1]
+set.seed(1)
+trainIndices = sample( c(1:totalRows), totalRows*0.80)
+trainData = simData[trainIndices, ]
+testData = simData[-trainIndices, ]
+```
+```{r}
+cv.error=rep(0,4)
+```
+
+#### LOOCV for polynomial with degree 1
+
+Following figure shows how a linear model with degree 1 fits the data.
+```{r}
+plot(x,y)
+glm.fit1 = glm(y ~ x, data = simData)
+pred = predict(glm.fit1, simData[order(x),])
+lines(sort(x), pred, col = "red")
+```
+The coefficient estimates for the degree 1 fit are:
+```{r}
+glm.fit1$coefficients
+cvResult1 = cv.glm(data = simData, glmfit = glm.fit1)
+```
+The LOOCV error is as follows:
+```{r}
+cv.error[1] = cvResult1$delta[1]
+cv.error[1]
+```
+
+#### LOOCV for polynomial with degree 2
+The fit for a polynomial with degree 2 is shown in the figure below:
+```{r}
+plot(x,y)
+glm.fit2 = glm(y ~ poly(x, 2), data = simData)
+pred = predict(glm.fit2, simData[order(x),])
+lines(sort(x), pred, col = "red")
+```
+The coefficient estimates are as follows:
+```{r}
+glm.fit2$coefficients
+cvResult2 = cv.glm(data = simData, glmfit = glm.fit2)
+```
+
+The LOOCV error for polynomial with degree 2 is:
+```{r}
+cv.error[2] = cvResult2$delta[1]
+cv.error[2]
+```
+
+#### LOOCV for polynomial with degree 3
+The fit for a polynomial with degree 3 is shown in the figure below:
+```{r}
+plot(x,y)
+glm.fit3 = glm(y ~ poly(x, 3), data = simData)
+pred = predict(glm.fit3, simData[order(x),])
+lines(sort(x), pred, col = "red")
+```
+Coeffienent estimates:
+```{r}
+glm.fit3$coefficients
+cvResult3 = cv.glm(data = simData, glmfit = glm.fit3)
+```
+
+LOOCV error:
+```{r}
+cv.error[3] = cvResult3$delta[1]
+cv.error[3]
+```
+
+#### LOOCV for polynomial with degree 4
+The fit for a polynomial with degree 4 is shown in the figure below:
+```{r}
+plot(x,y)
+glm.fit4 = glm(y ~ poly(x, 4), data = simData)
+pred = predict(glm.fit4, simData[order(x),])
+lines(sort(x), pred, col = "red")
+```
+Coeffienent estimates:
+```{r}
+glm.fit4$coefficients
+cvResult4 = cv.glm(data = simData, glmfit = glm.fit4)
+```
+LOOCV error:
+```{r}
+cv.error[4] = cvResult4$delta[1]
+cv.error[4]
+```
+
+#### LOOCV error estimates for each degree
+Following are the LOOCV estimates for each degree followed by a graph marked (in green) with the least LOOCV error estimate. 
+```{r}
+cv.error
+d = c(1,2,3,4)
+plot(d, cv.error, xlab="Degree", ylab = "LOOCV errors", col=ifelse(d==2, "green", "red"))
+```
+
+### Which of the models had the smallest LOOCV error?
+The model with degree 2 has the smallest LOOCV error. This was expected as the true model, $y = x - 2x^2 + e$ also has a degree 2. The polynomial with degree 1 has the heighest error which suggests that it is clearly a bad fit. The models with degree 3 and 4 will better explain the variance in the data than the one with degree 2. But, they will overfit the data and will not perform well for unseen data, hence their LOOCV error estimates are slightly greater. 
+
+
+### Statistical significance of the coefficient estimates
+Following is the summary of the fits with degree 1, 2, 3, and 4. It can be seen that the p-values for heigher order coefficients(power 3 and 4) is very less for fits with degree 3 and 4, which indicates that they are not significant. For a model with degree 1, the p-values indicate the power 1 coefficient is slightly significant. For the model with degree 2, each of the 3 coefficients are highly significant.
+
+The results agree with the conclusion (i.e. the best model is with a degree 2) drawn from cross validation. 
+```{r}
+summary(glm.fit1)
+summary(glm.fit2)
+summary(glm.fit3)
+summary(glm.fit4)
+```

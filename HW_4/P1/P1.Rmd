@@ -1,0 +1,282 @@
+---
+title: "HW-4-P1"
+author: "Jeetendra Gan"
+date: "11/27/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+getCorrelation <- function(corrMat, colNames, threshold) {
+  for(i in 1:length(colNames))
+  {
+    for(j in i+1: length(colNames)){
+      if(j <= length(colNames)){
+        if(corrMat[i, j] >= threshold){
+          cat(sprintf("%s, %s: %f \n", colNames[i], colNames[j], corrMat[i, j]))
+        }
+      }
+    }
+  }
+  return (c);
+}
+
+getFormulaFromCoeff <- function(coeff){
+  formatteedFeatureNames = paste(coeff[-1], collapse = "+")
+  linearModelFormula = paste("lpsa ~ ", formatteedFeatureNames)
+  return (linearModelFormula);
+}
+
+predict.regsubsets = function(object, newdata, id, ...) {
+    form = as.formula(object$call[[2]])
+    mat = model.matrix(form, newdata)
+    coefi = coef(object, id = id)
+    mat[, names(coefi)] %*% coefi
+}
+```
+
+```{r}
+library(ElemStatLearn)
+library(corrgram)
+library(DAAG)
+library(leaps)
+library(bootstrap)
+library(boot)
+data(prostate)
+trainIndices = prostate$train
+prostate = prostate[, -10]
+colNames = names(prostate)
+corr_data = cor(prostate)
+train = prostate[trainIndices, ]
+test = prostate[trainIndices == FALSE, ]
+```
+
+### Data analysis:
+Here is the summary of the the prostate data.
+```{r}
+summary(prostate)
+```
+From the summary, it can be seen that none of the variables have N.A. values.
+
+
+```{r}
+corrgram(prostate, order=TRUE, lower.panel=panel.shade, upper.panel=panel.pie,
+         text.panel=panel.txt, main="Prostate")
+```
+
+
+It can also be seen that two paris of features are highly correlated as shown below
+
+
+- lcavol, lpsa: 0.73
+- gleason, pgg45: 0.75
+
+
+## Best subset selection
+
+Here is the summary of best subset selection.
+```{r}
+library(leaps)
+regfit.full = regsubsets(lpsa ~ ., data = prostate, method = "exhaustive", nvmax = 9, )
+summary(regfit.full)
+```
+
+Here is the graph of Cp.
+
+```{r}
+regfit.summary = summary(regfit.full)
+minCpPt = which.min(regfit.summary$cp)
+plot(regfit.summary$cp, xlab="Number of variables", ylab = "Cp")
+points(minCpPt, regfit.summary$cp[minCpPt], pch = 20, col = "blue")
+```
+
+The point with minimun cp is shown as blue. A model with 5 predictors has the lowest Cp. Here are the features and their respective coefficients.
+
+```{r}
+#plot(regfit.full, scale = "Cp")
+coefsWithMinCp = coef(regfit.full, minCpPt)
+coefsWithMinCp
+modelWithMinCp = lm(lpsa ~ lcavol + lweight + age + lbph + svi , data=train)
+```
+
+After fitting the linear model to the data with the above features, it can be seen that the feature lcavol is the most significant. Age is the least significant out of all the variables.
+
+```{r}
+prediction = predict(modelWithMinCp, test)
+rmse_cp = sqrt(mean((test$lpsa - prediction)^2))
+
+prediction = predict(modelWithMinCp, train)
+rmse_cp_train = sqrt(mean((train$lpsa - prediction)^2))
+
+```
+
+## BIC
+```{r}
+minBicPt = which.min(regfit.summary$bic)
+plot(regfit.summary$bic, xlab="Number of variables", ylab = "BIC")
+points(minBicPt, regfit.summary$bic[minBicPt], pch = 20, col = "blue")
+```
+
+It can be seen that the model with 3 variables has the lowest BIC.
+
+## AIC
+I have used all the best 8 subsets selected by regsubsets and calculated their AIC. Here are the results.
+```{r}
+aicValues = rep(0, 8)
+for(i in 1:8){
+  iCoefs = coef(regfit.full, i)
+  formatteedFeatureNames = paste(names(iCoefs)[-1], collapse = "+")
+  linearModelFormula = paste("lpsa ~ ", formatteedFeatureNames)
+  modelI = lm(formula = linearModelFormula, data=train)
+  aic = AIC(modelI)
+  aicValues[i] = aic
+}
+plot(1:8, aicValues, xlab = "Number of features", ylab = "AIC")
+minAic = which.min(aicValues)
+points(minAic, aicValues[minAic], pch = 20, col = "blue")
+```
+
+
+The graph shows that the min AIC is for the model with 7 predictors. Here are the coefficients for the model with 7 predictors.
+
+```{r}
+minAicCoef = coef(regfit.full, minAic)
+minAicCoef
+```
+
+### Test and train RMSE for all the subsets
+Here is the RMSE for a model selected using subset selection.
+
+
+```{r}
+rmse_train = rep(0, 8)
+rmse_test = rep(0, 8)
+for(i in 1:8){
+  iCoefs = coef(regfit.full, i)
+  formatteedFeatureNames = paste(names(iCoefs)[-1], collapse = "+")
+  linearModelFormula = paste("lpsa ~ ", formatteedFeatureNames)
+  modelI = lm(formula = linearModelFormula, data=train)
+  preTrain = predict(modelI, train)
+  predTest = predict(modelI, test)
+  rmse_train[i] = sqrt(mean((train$lpsa - preTrain)^2))
+  rmse_test[i] = sqrt(mean((test$lpsa - predTest)^2))
+}
+plot(rmse_train, col = "blue", xlab="Features", ylab="Root MSE", pch=19, type="b", ylim=range(0.63, 0.83))
+points(rmse_test, pch = 19, type = "b", col = "black")
+legend("topright", legend = c("Training", "Test"), col=c("blue","black"), pch=19)
+```
+
+
+It can be seen that the model selected through BIC performs best on the test data.
+
+## Cross validation
+CV for 5 folds.
+
+
+```{r}
+k = 5
+set.seed(11)
+rep = rep(1:k, length = nrow(train))
+folds = sample(rep)
+cv.errors = matrix(NA, 5, 8)
+for(f in 1:k){
+  foldTrainingData = train[folds != f, ]
+  foldTestData  = train[folds == f, ]
+  subsetModels = regsubsets(lpsa ~ ., data = foldTrainingData, nvmax = 8)
+  
+  for(p in 1:8){
+    pthPrediction = predict(subsetModels, foldTestData, id = p)
+    cv.errors[f, p] = mean((foldTestData$lpsa - pthPrediction)^2)
+  }
+}
+
+rmse.cv = sqrt(apply(cv.errors, 2, mean))
+plot(rmse.cv, pch = 19, type="b", xlab = "Subset size", ylab = "Root MSE", col = "blue")
+legend("topright", legend = c("Cross Validation"), col=c("blue"), pch=19)
+```
+
+
+The plot above shows that a model with 7 predictors is better than the rest.
+
+
+## CV for 10 folds.
+
+```{r}
+k = 10
+set.seed(11)
+rep = rep(1:k, length = nrow(train))
+folds = sample(rep)
+cv.errors = matrix(NA, k, 8)
+for(f in 1:k){
+  foldTrainingData = train[folds != f, ]
+  foldTestData  = train[folds == f, ]
+  subsetModels = regsubsets(lpsa ~ ., data = foldTrainingData, nvmax = 8)
+  
+  for(p in 1:8){
+    pthPrediction = predict(subsetModels, foldTestData, id = p)
+    cv.errors[f, p] = mean((foldTestData$lpsa - pthPrediction)^2)
+  }
+}
+
+rmse.cv = sqrt(apply(cv.errors, 2, mean))
+plot(rmse.cv, pch = 19, type="b", xlab = "Subset size", ylab = "Root MSE", col = "blue")
+legend("topright", legend = c("Cross Validation"), col=c("blue"), pch=19)
+```
+We can observe the same behaviour for K = 10, as we observed for k = 5
+
+```{r}
+# create functions that feed into "bootpred"
+beta.fit <- function(X,Y){
+	lsfit(X,Y)	
+}
+
+beta.predict <- function(fit, X){
+	cbind(1,X)%*%fit$coef
+}
+
+sq.error <- function(Y,Yhat){
+  (Y-Yhat)^2
+}
+
+# Create X and Y
+X <- train[, -9]
+Y <- train[, 9]
+
+fit <- regsubsets(lpsa ~., data = train, method = "exhaustive", nvmax = 8)
+
+select = summary(fit)$outmat
+
+# Generalize it, and search over the best possible subsets of size "k"
+error_store <- c()
+for (i in 1:8){
+	# Pull out the model
+	temp <- which(select[i,] == "*")
+	
+	res <- bootpred(X[,temp], Y, nboot = 50, theta.fit = beta.fit, theta.predict = beta.predict, err.meas = sq.error) 
+	error_store <- c(error_store, res[[3]])
+	
+}
+ymin = min(error_store, rmse_train, rmse_test)
+ymax = max(error_store, rmse_train, rmse_test)
+plot(rmse_train, type = "o", lty = 2, col = "blue", ylim = range(ymin, ymax), xlab = "k", ylab = "error", main = "Model Selection")
+lines(rmse_test, type = "o", lty = 1, col = "red")
+lines(error_store, type = "o", lty = 3, col = "green")
+legend("topright", c("training", "test", "bootstrap .632"), lty = c(2,1), col = c("blue", "red", "green"))
+
+```
+
+### Inference
+After applying AIC, BIC, cross-validation(5, 10), bootstrap the results are somewhat differenct. AIC tells us that the best model to choose is with 7 predictors, BIC tells us that the model with 3 predictors is the best. Both cross validation agree with the result of AIC, i.e. the model with 7 predictors is the best. So does bootstrap. The only metric supporting BIC's conclusion is the test error, as it is the least for a model with size 3. But test error should not be relied upon as it can be a case of an unfortunate split. We also have a better measure of how each of our subset-feature models perform, which is through the 10 fold and 5 fold cross validation. 
+
+As there is a greater support in favor of a model with 7 subsets, I would select that over a model with size 3.
+
+

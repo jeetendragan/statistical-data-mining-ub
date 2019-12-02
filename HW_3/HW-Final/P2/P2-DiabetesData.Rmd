@@ -1,0 +1,171 @@
+---
+title: "P2-DiabetesData"
+author: "Jeetendra Gan"
+date: "11/4/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+I have written a python script to read the text data and convert it to csv. The feature names have been simplified.
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(corrgram)
+library(ISLR)
+library(MASS)
+library(class)
+library(ggplot2)
+library(GGally)
+```
+
+```{r message=FALSE, warning=FALSE}
+Diabetes <- read.csv(file="Diabetes.csv", header=TRUE, sep=",")
+summary(Diabetes)
+names(Diabetes)
+```
+
+Here are the prior probabilities of each class from class 1, class 2, followed by class 3, resp.
+```{r}
+fromClass1 = Diabetes$class[Diabetes$class == 1]
+fromClass2 = Diabetes$class[Diabetes$class == 2]
+fromClass3 = Diabetes$class[Diabetes$class == 3]
+class1Prob = length(fromClass1) / dim(Diabetes)[1]
+class2Prob = length(fromClass2) / dim(Diabetes)[1]
+class3Prob = length(fromClass3) / dim(Diabetes)[1]
+priorProb = c(class1Prob, class2Prob, class3Prob)
+priorProb
+```
+
+Here is the pariwise scatter-plot for each of the five variables
+```{r}
+Diabetes$classTemp = ifelse(Diabetes$class == 1,
+       "A", ifelse(Diabetes$class == 2, 
+                   "B", "C"))
+
+pm <- ggpairs(Diabetes, columns = 1:5, ggplot2::aes(colour=classTemp))
+pm
+
+Diabetes = Diabetes[,-c(7)]
+```
+
+
+**Classes have difference covariance matrix** 
+The variances of feature distribution for classes are different as can be seen in the plot above. Consider, i.area, the variance for class 1 is larger than that for classes 2, and 3.
+
+**The classes are not multi-variate normal**
+LDA assumes that the density of features for a given class is normall distributed. It can be seen from the image that the feature densities do not have an ideal normal distribution but are very close to normal. For i.area and SSPG, the distribution of class A(1), may not look normal, but it can be assumed to be normal with a large variance.
+
+### Test-train division
+The data is split into 70% training and 25% test set. In the training data, the data points belonging to class 1, class 2, and class 3 are shown below. 
+```{r}
+set.seed(0)
+totalRows = dim(Diabetes)[1]
+trainIndices = sample( c(1:totalRows), totalRows*0.70)
+trainData = Diabetes[trainIndices, ]
+testData = Diabetes[-trainIndices, ]
+#summary(trainData)
+#summary(testData)
+trainDataClassCnt = c(sum(trainData$class == 1), sum(trainData$class == 2), sum(trainData$class == 3))
+trainDataClassCnt
+```
+The the test data, the count of data points belonging to class 1, class 2, and class 3 are shown below. 
+```{r}
+testDataClassCnt = c(sum(testData$class == 1), sum(testData$class == 2), sum(testData$class == 3))
+testDataClassCnt
+```
+
+### LDA
+```{r}
+lda.fit = lda(class~., data=trainData)
+lda.fit
+plot(lda.fit)
+lda.pred=predict(lda.fit, testData[-6])
+tbl = table(lda.pred$class,testData$class)
+```
+The predictions done by LDA are as follows:
+```{r}
+tbl
+```
+The miss-classification percentage for LDA on test data is:
+```{r}
+LDAMissClass = (tbl[1,2] + tbl[1,3] + tbl[2,1] + tbl[2,3] + tbl[3,1] + tbl[3,2]) / dim(testData)[1]
+LDAMissClass*100
+```
+
+LDAs performance on train data:
+```{r}
+lda.pred=predict(lda.fit,trainData[-6])
+tbl = table(lda.pred$class,trainData$class)
+tbl
+```
+Miss-classifications on train data:
+```{r}
+LDAMissClassTrain = (tbl[1,2] + tbl[1,3] + tbl[2,1] + tbl[2,3] + tbl[3,1] + tbl[3,2]) / dim(trainData)[1]
+LDAMissClassTrain*100
+```
+
+### QDA
+```{r}
+qda.fit = qda(class~., data=trainData)
+qda.fit
+qda.pred=predict(qda.fit, testData[-6])
+tbl = table(qda.pred$class,testData$class)
+```
+The predictions done by QDA on test data are as follows:
+```{r}
+tbl
+```
+
+The miss-classification percentage of QDA on test data is:
+```{r}
+QDAMissClass = (tbl[1,2] + tbl[1,3] + tbl[2,1] + tbl[2,3] + tbl[3,1] + tbl[3,2]) / dim(testData)[1]
+QDAMissClass*100
+```
+
+Performance of QDA on train data:
+```{r}
+qda.pred=predict(qda.fit, testData[-6])
+tbl = table(qda.pred$class,testData$class)
+tbl
+```
+The miss-classification percentage of QDA on train data is:
+```{r}
+QDAMissClassTrain = (tbl[1,2] + tbl[1,3] + tbl[2,1] + tbl[2,3] + tbl[3,1] + tbl[3,2]) / dim(trainData)[1]
+QDAMissClassTrain*100
+```
+
+
+### Performance of LDA and QDA
+I did multiple tests by setting different seed values. In general QDA performed better than LDA. As seen above, for the current seed, QDA's test and train error are lesser than LDA's test and train error. The above observation might be due to the violation of the rule/assumption that all the features have the same variance. Violation of the above rule may make LDA a weaker candidate. QDA works when the variances are not the same. 
+
+### Classification results for test sample
+Following is the test sample:
+```{r}
+g.area = 0.98
+i.area = 122
+SSPG = 544
+weight = 186
+fp.glucose = 184
+testSample = data.frame(g.area, i.area, SSPG, weight, fp.glucose)
+testSample
+```
+LDA assigns this individual to:
+```{r}
+lda.pred = predict(lda.fit, testSample)
+lda.pred$class
+```
+The posterior probabilities are shown below. It can be seen that LDA assigns the data point to class 3 with a probability which is only slightly greater than that for class 2.
+```{r}
+lda.pred$posterior
+```
+QDA assigns the individual to:
+```{r}
+qda.pred = predict(qda.fit, testSample)
+qda.pred$class
+```
+The posterior probabilities are shown below. We can say that QDA classifies the data point very confidently to class 2. 
+```{r}
+qda.pred$posterior
+```

@@ -1,0 +1,140 @@
+---
+title: "P4-SpamData"
+author: "Jeetendra Gan"
+date: "11/30/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+library(corrgram)
+library(randomForest)
+library(caret)
+spamData <- read.csv(file = 'spambase.data', header = FALSE)
+featureNames <- read.csv(file = "FeatureNames.csv", header = TRUE)
+names(spamData) = names(featureNames)
+spamData$IsSpam = as.factor(spamData$IsSpam)
+```
+
+The data has slightly imbalanced classes with around 39% marked as spam. 
+
+
+```{r}
+set.seed(1)
+totalRows = dim(spamData)[1]
+trainIndices = sample( c(1:totalRows), totalRows*0.75)
+train = spamData[trainIndices, ]
+trainSpamCnt = sum(as.numeric(train$IsSpam) - 1)
+trainSpamPerc = (trainSpamCnt / dim(train)[1])*100
+test = spamData[-trainIndices, ]
+testSpamCnt = sum(as.numeric(test$IsSpam) - 1)
+testSpamPerc = (testSpamCnt / dim(test)[1])*100
+print(sprintf("The percentage of spam rows in train data is: %f", trainSpamPerc))
+print(sprintf("The percentage of spam rows in test data is: %f", testSpamPerc))
+```
+
+
+So, our test data and train are only slightly imbalanced.
+
+
+### Applying random forest
+
+
+```{r}
+precision = c()
+recall = c()
+allTrainAccuracy = c()
+allTestAccuracy = c()
+oobMeanError = c()
+M = 50
+for(m in 1:M){
+  rf.fit <- randomForest(IsSpam ~. , data = train, ntree = 100, mtry = m)
+  oobMeanError = cbind(oobMeanError ,mean(rf.fit$err.rate[, 1]))
+  y_hat <- predict(rf.fit, newdata = test, type = "response")
+  randomForest_conf_mat = confusionMatrix(as.factor(y_hat), as.factor(test$IsSpam))
+  confTable = randomForest_conf_mat$table
+  testAccuracy = randomForest_conf_mat$overall["Accuracy"]
+  testPrec = confTable[2, 2] / (confTable[2, 2] + confTable[2, 1])
+  testRecall = confTable[2, 2] / (confTable[1, 2] + confTable[2, 2])
+  
+  allTestAccuracy = cbind(allTestAccuracy, testAccuracy)
+  precision = cbind(precision, testPrec)
+  recall = cbind(recall, testRecall)
+  
+  y_hat = predict(rf.fit, newdata = train, type = "response")
+  trainConfMat = confusionMatrix(as.factor(y_hat), as.factor(train$IsSpam))
+  trainAccuracy = trainConfMat$overall["Accuracy"]
+  allTrainAccuracy = cbind(allTrainAccuracy, trainAccuracy)
+}
+```
+
+### OOB Vs Test Error
+
+I have used the following algorithm for computing the OOB estimate for each value of m
+
+
+- for every value of m
+
+
+    - get the mean of errors for all trees in a forest produced by mtry = m
+    
+    
+plot the collected mean for each forest against the interaction depth values
+
+
+```{r}
+allTestError = 1 - allTestAccuracy
+allTrainError = 1 - allTrainAccuracy
+#yMin = min(oobMeanError, allTestError, allTrainError)
+yMin = min(oobMeanError, allTestError)
+#yMax = max(oobMeanError, allTestError, allTrainError)
+yMax = max(oobMeanError, allTestError)
+plot(1:M, oobMeanError[1, ], ylab = "Error", pch = 19, type = "b", col = "black", ylim = range(yMin, yMax))
+points(allTestError[1, ], col = "blue", pch = 19, type = "b")
+#points(allTrainError[1, ], col = "green", pch = 19, type = "b")
+legend("topright", legend = c("OOB Error", "Test Error"), col= c("black", "blue"), pch = 19)
+```
+
+```{r}
+#yMin = min(allTrainAccuracy[1, ], allTestAccuracy[1, ])
+#yMax = max(allTrainAccuracy[1, ], allTestAccuracy[1, ])
+#plot(allTrainAccuracy[1, ], ylab= "Train accuracy", pch=19, type="b", col = "black", ylim = range(yMin, yMax))
+#points(allTestAccuracy[1, ], col = "blue", pch = 19, type = "b")
+#legend("topleft", legend = c("Training", "Test"), col=c("black", "blue"), pch=19)
+```
+
+
+It can be seen that the OOB error and test error is very close. Test error is slightly lesser than OOB error. OOB error is somewhat equivalent to the cross validation error estimate. Hence generalizes better than the test error.
+
+
+#### Model sensitivity to m
+
+The precision on the test data follows the trend as shown below.
+
+
+```{r}
+plot(1:M, precision[1, ], ylab="Precision", pch = 19, type="b", col = "blue", ylim = range(min(precision), max(precision)))
+```
+
+The recall on the test data is shown below. 
+
+
+```{r}
+plot(1:M, recall[1, ], xlab = "m", ylab = "Recall", pch = 19, type = "b", col = "blue")
+```
+
+As the value of m increases, the error decreases. An increase in m helps us capture greater variance in the data. But after a point, that increase is of no use as the information has already been captured by other smaller models. Random forest does not overfit, hence the error does not flucturte too much after some point. Looking at the graph of m vs Error, it can be seen that a value of 5 is good.
+
+###### Sensitivity to precision and recall
+Precision is decaying very very slowly. Even though fluctuations can be seen in the graph, they are happening over a very small range, so the difference is negligible.
+
+A clear pattern can be seen for recall, It increases significantly till a value of 5 and then remains constant more or less. 

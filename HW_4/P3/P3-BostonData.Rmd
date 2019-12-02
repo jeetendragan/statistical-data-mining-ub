@@ -1,0 +1,237 @@
+---
+title: "P3-BostonDataSet"
+author: "Jeetendra Gan"
+date: "11/27/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+In this problem I will be using the boston data set. In this case our response is 'crim', but crim is a quantative variable. I have replaced crim with TRUE/FALSE, TRUE if the crime rate is greater than the median value, else false. Following are the variable names in the boston data set.
+
+```{r}
+library(corrgram)
+library(ISLR)
+library(MASS)
+library(caret)
+library(class)
+library(rpart)
+library(gbm)
+library(randomForest)
+data(Boston)
+names(Boston)
+```
+
+The median for crime rate is:
+```{r}
+crimMedian = median(Boston$crim)
+crimMedian
+```
+Here is the statistic after crim is transformed as a categorical variable.
+```{r}
+crimAsClass = ifelse(Boston$crim > crimMedian, TRUE, FALSE)
+summary(crimAsClass)
+data = Boston
+data$crim = crimAsClass
+```
+I have divided the data set into 75% train and 25% test set.
+```{r}
+set.seed(1)
+totalRows = dim(data)[1]
+trainIndices = sample( c(1:totalRows), totalRows*0.75)
+train = data[trainIndices, ]
+test = data[-trainIndices, ]
+```
+
+# Non-ensemble methods
+## Logistic regression
+
+Here is the summary after applying logistic regression.
+```{r}
+glm_fit = glm(crim ~ ., data = train, family = "binomial")
+summary(glm_fit)
+```
+
+For logistic regression following is the order of variable significance - nox > age = dis = rad > tax = zn.
+
+
+```{r}
+predictions = predict(glm_fit, test[, -1], type = "response")
+predictions = ifelse(predictions < 0.5, FALSE, TRUE)
+conf_mat = confusionMatrix(data = as.factor(predictions), as.factor(test$crim))
+```
+
+The predictions done by Logistic regression is as follows:
+
+```{r}
+conf_mat$table
+```
+
+```{r}
+logit_acc = round(conf_mat$overall["Accuracy"], 2)
+print(paste("The accuracy obtained using logistic regression:", logit_acc))
+```
+
+## KNN
+
+I have fit the knn model using K = 5. Here are the predictions
+
+```{r}
+trainX = train[,-1]
+trainY = train[, 1]
+
+testX = test[,-1]
+testY = test[, 1]
+
+knn.pred = knn(train = trainX, test = testX, cl = trainY, k = 3)
+conf_mat = confusionMatrix(as.factor(knn.pred), as.factor(testY))
+conf_mat$table
+```
+```{r}
+knn_acc = round(conf_mat$overall["Accuracy"], 2)
+print(paste("The accuracy obtained using KNN is: ", knn_acc))
+```
+It can be seen that both knn and logistic regression have almost the same accuracy.
+
+## Bagging
+
+The following is the result after applying bagging. The plot shows the importance of variables. The variable importance is close to our findings in logistic regression.
+
+
+```{r}
+train$crim = as.factor(train$crim)
+bag.fit = randomForest(crim ~ ., data = train, n.tree = 100000, mtry = 10)
+
+varImpPlot(bag.fit)
+
+importance(bag.fit)
+
+pred = predict(bag.fit, newdata = test, type = "response")
+pred = as.numeric(pred) - 1
+true_resp = ifelse(test$crim == TRUE, 1, 0)
+bagging_conf_mat = confusionMatrix(as.factor(pred), as.factor(true_resp))
+```
+The predictions done by bagging are as follows:
+```{r}
+bagging_conf_mat$table
+```
+
+```{r}
+bagging_acc = round(bagging_conf_mat$overall["Accuracy"], 3)
+print(paste("The accuracy obtained using bagging: ", bagging_acc))
+```
+It can be seen that bagging performs better than KNN and logistic.
+
+## Randomforest
+```{r}
+rf.fit <- randomForest(crim ~. , data = train, n.tree = 10000)
+
+varImpPlot(rf.fit)
+
+importance(rf.fit)
+
+y_hat <- predict(rf.fit, newdata = test, type = "response")
+y_hat <- as.numeric(y_hat)-1
+true_resp = ifelse(test$crim == TRUE, 1, 0)
+randomForest_conf_mat = confusionMatrix(as.factor(pred), as.factor(true_resp))
+```
+The accuracy obtained using random forest is:
+```{r}
+randomFor_acc = round(randomForest_conf_mat$overall["Accuracy"], 3)
+print(paste("The accuracy obtained using random forests is: ", randomFor_acc))
+```
+
+## Boosting
+
+```{r}
+applyBoosting <- function(train, test, treeCount, shrinkageParameters, interactionDepth){
+  boost.train <- train;
+  boost.train$crim <- as.numeric(train$crim)-1
+  boost.test <- test;
+  boost.test$crim <- as.numeric(test$crim)
+  y_true = boost.test$crim
+  
+  shrink <- c(.1, .4, .6, .8)
+  max_iter <- treeCount
+  store_error <- c()
+  for (i in 1:length(shrink)){
+  	boost.fit <- gbm(crim ~ ., data = boost.train, n.trees = max_iter, shrinkage = shrink[i], interaction.depth = interactionDepth, distribution = "adaboost")
+  	temp <- c()
+  	for (j in 1:max_iter){
+  		y_hat = predict(boost.fit, newdat = boost.test, n.trees = j, type = "response")
+  		y_hat = ifelse(y_hat < 0.5, 0, 1) 
+  		conf_mat = confusionMatrix(as.factor(y_hat), as.factor(y_true))
+  		temp = c(temp, 1-conf_mat$overall["Accuracy"])
+  	}
+  	store_error <- cbind(store_error, temp) # max_iter x length(shrink)
+  }
+  
+  colnames(store_error) <- paste("shrinkage", shrink, sep = ":")
+  shrinkageAsString = paste("{", toString(shrinkageParameters), "}")
+  plotTitle = paste("Error Profiles:(Trees, Shrinkage, Interaction):", treeCount, shrinkageAsString, interactionDepth, sep=",")
+  plot(store_error[,1], type = "l", main = "Error profiles", sub=plotTitle, ylab = "error", xlab = "boosting iterations", ylim=c(0.03937, 0.18110))
+  lines(store_error[,2], col = "red")
+  lines(store_error[,3], col = "blue")
+  lines(store_error[,4], col = "green")
+  
+  legend(x=-3,y=7,c("la = 0.1","la = 0.4", "la = 0.6", "la = 0.8"), cex=.8,col=c("black","red","blue", "green"), pch=c(1,2))
+}
+
+applyBoosting(train, test, 50, c(0.1, 0.4, 0.6, 0.8), interactionDepth = 1)
+applyBoosting(train, test, 50, c(0.1, 0.4, 0.6, 0.8), interactionDepth = 3)
+applyBoosting(train, test, 50, c(0.1, 0.4, 0.6, 0.8), interactionDepth = 5)
+applyBoosting(train, test, 50, c(0.1, 0.4, 0.6, 0.8), interactionDepth = 7)
+
+##  Boosting with shrinkage error of: #0.125 
+
+#library(adabag) #multiple classes > 2
+```
+
+The graphs are drawn for interaction depths for values - 1, 3, 5, and 7. It can be seen that as the interaction depth increases, the error drops at a faster rate with larger tree count for all the values of lambda. The behaviour of all the models is almost the same if the count of trees is increased.
+
+I have picked interaction depth equal to 5, and lambda equal to 0.4, and tree count equal to 50 so as to create the boosting model.
+Here is the confusion matrix.
+
+```{r}
+boost.train <- train;
+boost.train$crim <- as.numeric(train$crim)-1
+boost.test <- test;
+boost.test$crim <- as.numeric(test$crim)
+boost.fit <- gbm(crim ~ ., data = boost.train, n.trees = 50, shrinkage = 0.4, interaction.depth = 5, distribution = "adaboost")
+y_true = boost.test$crim
+y_hat = predict(boost.fit, newdat = boost.test, n.trees = 50, type = "response")
+y_hat = ifelse(y_hat < 0.5, 0, 1) 
+conf_mat = confusionMatrix(as.factor(y_hat), as.factor(y_true))
+conf_mat$table
+```
+
+
+```{r}
+sprintf("The accuracy obtained using boosting is: %f", conf_mat$overall["Accuracy"])
+```
+Heighest accuracy is obtained using boosting! Which is closely followed by Random forests and bagging. These three ensamble methods perform better than simple methods like logistic and knn by about 2 percent. 
+
+#### Advantages of committee machines over simple methods
+
+Bagging averages various trees created using bootstraped data. It simulates the population properties by bootrstrapping. Whereas logistic regression and knn do not do that. Their only reference is the training set. The size of the training set of the current data is 380, which is not much. 
+
+Random forests capture the uncorrelated aspects of the data, which is, in general hard to capture using logistic regression and knn.
+
+Boosting uses multiple weak learners which capture unique signals in the data which are all algomerated to form a strong learner. Again this is not possible to capture these signals using logistic and knn, unless we overfit the data. Boosting can also overfit, but does that slowly. Also, the risk of overfitting is reduced because, the majority vote is taken across multiple trees. 
+
+KNN may not perform well when the data is sparce in heigher dimensions. Our data set has 14 dimensions and just 379 variables. 
+
+Logistic regression considers a linear decision boundary(in our case above). There is a good chance that our data is non-linear in nature.
+
+Disadvantage of boosting is that there are three tuning parameters - tree count, shrinkage, and interaction depth. While simple models do not have that many(knn has only one, i.e k.)
+
+
+

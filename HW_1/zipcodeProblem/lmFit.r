@@ -30,7 +30,7 @@ formatedFeatureNames = paste(featureNames, collapse = "+");
 
 # build the linear model formula
 linearModelFormula = paste("V1 ~ ", formatedFeatureNames, sep="");
-
+    
 # generate a multiple regression fit
 fit = lm(formula = linearModelFormula, data = trainingData);
 

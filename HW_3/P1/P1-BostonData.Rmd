@@ -1,0 +1,362 @@
+---
+title: "P1-Boston-Data"
+author: "Jeetendra Gan"
+date: "11/4/2019"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+Following are the features in the boston data set. With 'crim' as the quantitative variable. I have replaced crim with TRUE/FALSE, TRUE if the crime rate is greater than the median value, else false.
+
+```{r}
+library(corrgram)
+library(ISLR)
+library(MASS)
+library(class)
+names(Boston)
+```
+
+The median for crime rate is:
+```{r}
+crimMedian = median(Boston$crim)
+crimMedian
+```
+Here is the statistic after crim is transformed as a categorical variable.
+```{r}
+crimAsClass = ifelse(Boston$crim > crimMedian, TRUE, FALSE)
+summary(crimAsClass)
+```
+
+We have a perfectly balanced class set. 253 variables on either side.
+I will be comparing each of the algorithms on the basis of the accuracy, precision, and recall. As the classes are well balanced, we can hope to have a good comparision between algorithms on the basis of above written metrics.
+
+```{r}
+Boston$crim = crimAsClass
+```
+### Data Cleaning
+None of the features has N.A. values, negative values. So, no pre-processing is required. In order to identify the correlation between the features, I have plotted, the correlation matrix.
+
+```{r}
+corrgram(Boston, main="Boston Correlation", lower.panel = panel.pie, upper.panel = panel.pts)
+#corrplot::corrplot.mixed(cor(Boston), upper="circle")
+```
+Following are the observations with respect to correlation between variables
+
+
+##### Positive correlation
+
+1. Indus - Chas
+2. Indus - Age
+3. Indus - Rad
+4. Indus - Tax
+5. Indus - Lstat
+6. Nox - Rad
+7. Nox - Tax
+8. Nox - Lstat
+9. rm - medv
+10. age - Lstat
+11. rad - tax
+12. zn - dist
+
+##### Negative correlation
+
+
+1. Zn - age
+2. indus - dis
+3. rm - lstat
+4. age - dist
+5. lstat - medv
+
+
+### Train-test division
+
+I have selected 75% of the samples randomly as the training data, the rest will be the test data.
+```{r}
+set.seed(1)
+totalRows = dim(Boston)[1]
+trainIndices = sample( c(1:totalRows), totalRows*0.75)
+trainData = Boston[trainIndices, ]
+testData = Boston[-trainIndices, ]
+#summary(trainData)
+#summary(testData)
+```
+Our train and test data sets are also very well balanced, with train data set containing 190, and 189 TRUE, FALSE cases respectively, and the test set containing 63, and 64 TRUE, FALSE cases respectively.
+
+### Logistic Regression
+
+Here is the summary of logistic regression on the training data
+```{r}
+glm.fit=glm(crim~ . , data=trainData, family=binomial)
+summary(glm.fit)
+```
+```{r}
+glm.probs = predict(glm.fit, newdata= testData, type="response")
+glm.pred = ifelse(glm.probs > 0.5, TRUE, FALSE)
+tbl = table(glm.pred, testData$crim)
+tbl
+```
+
+The accuracy obtained is:
+```{r}
+logisticAccuracy = mean(glm.pred == testData$crim)
+logisticAccuracy
+```
+
+The miss-classification percentage is:
+```{r}
+(1-logisticAccuracy)*100
+```
+
+The model precision is:
+```{r}
+logisticPrecision = tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+logisticPrecision
+```
+
+The model recall is:
+```{r}
+logisticRecall = tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+logisticRecall
+```
+The most significant features are nox, age, dis, rad. 
+
+I have fit fit a new model using these features.
+
+```{r}
+trainSubset1 = trainData[, c("crim","nox", "age", "dis", "rad")]
+testSubset1 = testData[, c("crim","nox", "age", "dis", "rad")]
+glm.fitSub1 = glm(crim~ . , data=trainSubset1, family=binomial)
+summary(glm.fitSub1)
+```
+'dis' has lost a lot of its significance as can be seen by its increase in the p-value. After testing the model on the test data following results are obtained.
+```{r}
+glm.probs = predict(glm.fitSub1, newdata= testSubset1, type="response")
+glm.pred = ifelse(glm.probs > 0.5, TRUE, FALSE)
+tbl = table(glm.pred, testData$crim)
+tbl
+```
+The misclassification percentage is:
+```{r}
+logSub1MissClass = ((tbl[1,2]+tbl[2,1])/(dim(testSubset1)[1]))*100
+logSub1MissClass
+```
+
+The model precision is:
+```{r}
+tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+```
+
+The model recall is:
+```{r}
+tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+```
+
+The miss-classification is almost twice as much as it is with all the variables. Both false positives and false negatives have increased, i.e. both recall and precision have dropped. 
+
+We could also remove dis, and fit the model. Now we have "crim", "nox", "age", "rad" in the feature set. 
+
+Here is the summary of the fit.
+
+```{r}
+trainSubset2 = trainData[, c("crim", "nox", "age", "rad")]
+testSubset2 = testData[, c("crim", "nox", "age", "rad")]
+glm.fitSub2 = glm(crim~ . , data=trainSubset2, family=binomial)
+summary(glm.fitSub2)
+```
+
+```{r}
+glm.probs = predict(glm.fitSub2, newdata= testSubset2, type="response")
+glm.pred = ifelse(glm.probs > 0.5, TRUE, FALSE)
+tbl = table(glm.pred, testSubset2$crim)
+tbl
+```
+
+The misclassification percentage is:
+```{r}
+logSub2MissClass = ((tbl[1,2]+tbl[2,1])/(dim(testSubset2)[1]))*100
+logSub2MissClass
+```
+
+The model precision is:
+```{r}
+tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+```
+
+The model recall is:
+```{r}
+tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+```
+
+The model without dis is better than the one without it in all respects like the precision, recall, and accuracy(1 - Miss-classifications) but not better than all the features. But, it can be a better fit as it simpler than a model that has all the features.
+
+### Linear Discriminant Analysis
+```{r}
+lda.fit = lda(crim~., data=trainData)
+lda.pred=predict(lda.fit, testData)
+tbl = table(lda.pred$class,testData$crim)
+```
+The Accuracy obtained using LDA is:
+```{r}
+ldaAccuracy = mean(lda.pred$class==testData$crim)
+ldaAccuracy
+```
+
+The precision for LDA is:
+```{r}
+ldaPrecision = tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+ldaPrecision
+```
+
+The recall for LDA is:
+```{r}
+ldaRecall = tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+ldaRecall
+```
+
+The model above considers all the featueres. It also has been noted that for the same features, the results are significantly different for different models, which is expected.
+
+Results for the subset - nox, age, dis, rad
+```{r}
+lda.fit = lda(crim~., data=trainSubset1)
+lda.pred = predict(lda.fit, testSubset1)
+tbl = table(lda.pred$class, testSubset1$crim)
+tbl
+```
+The accuracy is:
+```{r}
+mean(lda.pred$class==testData$crim)
+```
+
+Precision is:
+```{r}
+tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+```
+
+Recall is:
+```{r}
+tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+```
+It can be seen that the recall is the lowest. This model is not suitable for applications where it is safer to err on the side of caution due to low recall. 
+
+Results for the subset - nox, age, rad
+```{r}
+lda.fit = lda(crim~., data=trainSubset2)
+lda.pred = predict(lda.fit, testSubset2)
+tbl = table(lda.pred$class, testSubset2$crim)
+tbl
+```
+The accuracy is:
+```{r}
+mean(lda.pred$class == testData$crim)
+```
+
+Precision is:
+```{r}
+tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+```
+
+Recall is:
+```{r}
+tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+```
+Even after removing the dis feature, the results are exactly the same. This suggests that dis was insignificant in the context of the above 4 variables for LDA.
+
+### Knn classification
+Here are the results of KNN classification for all features. 
+```{r}
+trainX = trainData[,-1]
+trainY = trainData[1]
+trainY = trainY[, 1]
+
+testX = testData[,-1]
+testY = testData[1]
+testY =  testY[, 1]
+
+trainSub1 = trainX[, c("nox", "age", "rad", "dis")]
+testSub1 = testX[, c("nox", "age", "rad", "dis")]
+trainSub2 = trainX[, c("nox", "age", "rad")]
+testSub2 = testX[, c("nox", "age", "rad")]
+
+knn.pred = knn(train = trainX, test = testX, cl = trainY, k=3)
+tbl = table(knn.pred, testY)
+tbl
+```
+
+The accuracy obtained with knn with k = 3 is:
+```{r}
+knnAccuracy = mean(knn.pred == testY)
+knnAccuracy
+```
+
+The precision obtained for Knn is:
+```{r}
+knnPrecision = tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+knnPrecision
+```
+
+Recall for knn is:
+```{r}
+knnRecall = tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+knnRecall
+```
+For subset with "nox", "age", "rad", "dis" features following results are obtained
+```{r}
+knn.pred = knn(train = trainSub1, test = testSub1, cl = trainY, k=3)
+tbl = table(knn.pred, testY)
+tbl
+```
+
+Accuracy:
+```{r}
+mean(knn.pred == testY)
+```
+
+Precision:
+```{r}
+tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+```
+
+Recall:
+```{r}
+tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+```
+
+For subset with "nox", "age", "rad" features following results are obtained
+```{r}
+knn.pred = knn(train = trainSub2, test = testSub2, cl = trainY, k=3)
+tbl = table(knn.pred, testY)
+tbl
+```
+
+Accuracy:
+```{r}
+mean(knn.pred == testY)
+```
+
+Precision:
+```{r}
+tbl[2, 2] / (tbl[2, 2] + tbl[2, 1])
+```
+
+Recall:
+```{r}
+tbl[2, 2] / (tbl[2, 2]+tbl[1, 2])
+```
+
+After dropping 'dis' there is a significant difference in each of the three parameters. But, in general the model will all the features preforms better for Knn.
+
+```{r}
+resultMatrix <- matrix(c(logisticAccuracy,logisticPrecision,logisticRecall,ldaAccuracy,ldaPrecision,ldaRecall,knnAccuracy,knnPrecision,knnRecall), ncol=3, byrow=TRUE)
+colnames(resultMatrix) <- c("Accuracy","Precision","Recall")
+rownames(resultMatrix) <- c("Logistic","LDA","kNN")
+resultMatrix <- as.table(resultMatrix)
+resultMatrix
+```
+
+Logistic and Knn perform better than LDA on every parameter. KNN is more precise as compared to Logistic, whereas logistic has a better recall. The accuracy of Knn and logistic is almost the same. We can use KNN when we want proportion of positive identifications marked as actually correct to be greater. Logistic can be used when we want proportion of actual positives identified correctly to be greater. 

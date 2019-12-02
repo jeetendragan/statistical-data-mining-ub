@@ -1,0 +1,145 @@
+---
+title: "P2-WineData"
+author: "Jeetendra Gan"
+date: "11/30/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+require(rpart)
+library(rpart.plot)
+wineData = read.csv("wine.data", header = FALSE)
+wineFeatures = c("Response", "Alcohol","Malic acid", "Ash", "Alcalinity of ash", "Magnesium", "Total phenols", "Flavanoids",
+ 	"Nonflavanoid phenols", "Proanthocyanins", "Color intensity", "Hue", "OD280/OD315 of diluted wines",
+ 	"Proline")
+names(wineData) = wineFeatures
+class1Cnt = sum(as.numeric(wineData$Response == 1))
+class2Cnt = sum(as.numeric(wineData$Response == 2))
+class3Cnt = sum(as.numeric(wineData$Response == 3))
+```
+I have divided the data set into 75% train and 25% test.
+```{r}
+set.seed(1)
+totalRows = dim(wineData)[1]
+trainIndices = sample( c(1:totalRows), totalRows*0.75)
+train = wineData[trainIndices, ]
+test = wineData[-trainIndices, ]
+classPercTrain = rep(0, 3)
+classPercTest = rep(0, 3)
+classPercTrain[1] = (sum(as.numeric(train$Response == 1))/dim(train)[1])*100
+classPercTrain[2] = (sum(as.numeric(train$Response == 2))/dim(train)[1])*100
+classPercTrain[3] = (sum(as.numeric(train$Response == 3))/dim(train)[1])*100
+
+classPercTest[1] = (sum(as.numeric(test$Response == 1))/dim(test)[1])*100
+classPercTest[2] = (sum(as.numeric(test$Response == 2))/dim(test)[1])*100
+classPercTest[3] = (sum(as.numeric(test$Response == 3))/dim(test)[1])*100
+classes = 1:3
+compTable = data.frame(classes, classPercTrain, classPercTest)
+names(compTable) = c("Classes", "% in Train", "% in Test")
+compTable
+```
+The above table shows that the classes are distributed evenly across train and test (i.e. the ratio of class 1(and others) is same in both train and test), although there is a little imbalance which is also present in the main data.
+
+#### Approach used to select the model.
+```{r}
+unprunedModels = c()
+prunedModels = c()
+unprunedAcc = c()
+prunedAcc = c()
+trainUnprunedAcc = c()
+trainPrunedAcc = c()
+totalSplits = 30
+for(splitCnt in 1: totalSplits){
+  model.control <- rpart.control(minsplit = splitCnt, xval = 20, cp = 0)
+  fit <- rpart(Response ~., data = train, method = "class", control = model.control)
+  y_true = test$Response
+  y_true_train = train$Response
+  
+  pred_unpruned = predict(fit, newdata = test, type = "class")
+  y_hat = as.numeric(pred_unpruned)
+  correctClass = sum(y_hat == y_true)/length(y_hat)
+  unprunedAcc = c(unprunedAcc, correctClass)
+  unprunedModels = c(unprunedModels, fit)
+  
+  min_cp = which.min(fit$cptable[, 4])
+  
+  pred_unpruned = predict(fit, newdata = train, type = "class")
+  y_hat = as.numeric(pred_unpruned)
+  correctClass = sum(y_hat == y_true_train)/length(y_hat)
+  trainUnprunedAcc = c(trainUnprunedAcc, correctClass)
+  
+  
+  pruned_fit <- prune(fit, cp = fit$cptable[min_cp, 1])
+  prunedModels = c(prunedModels, pruned_fit)
+  
+  # Compute test error for a single tree
+  my_pred <- predict(pruned_fit, newdata = test, type = "class")
+  y_hat <- as.numeric(my_pred)
+  correctClass <- sum(y_hat == y_true)/length(y_hat)
+  prunedAcc = c(prunedAcc, correctClass)
+  
+  pruned_pred = predict(pruned_fit, newdata = train, type = "class")
+  y_hat = as.numeric(pruned_pred)
+  correctClass =sum(y_hat == y_true_train)/ length(y_hat)
+  trainPrunedAcc = c(trainPrunedAcc, correctClass)
+}
+yMin = min(unprunedAcc, prunedAcc, trainUnprunedAcc, trainPrunedAcc)
+yMax = max(unprunedAcc, prunedAcc, trainUnprunedAcc, trainPrunedAcc)
+plot(1:totalSplits, unprunedAcc, ylab = "Accuracy", pch = 19, type = "b", col = "black", ylim = range(yMin, yMax))
+points(prunedAcc, col = "blue", pch = 19, type = "b")
+points(trainUnprunedAcc, col = "green", pch = 19, type = "b")
+points(trainPrunedAcc, col = "red", pch = 19, type = "b")
+legend("topright", legend = c("Unpruned accuracy(Test)", "Pruned accuracy(Test)", "Unpruned accuracy(Train)", "Pruned accuracy(Train)"), col= c("black", "blue", "green", "red"), pch = 19)
+```
+
+I have trained the model over various values of min-split, ranging from 1 to 30. For each value of min-split, I have calculated the training(Unpruned accuracy-train), and test accuracy(Unpruned accuracy-Test). Also, for every model, the min cp has been found out. The min cp is used to prune the tree. After the tree is pruned, both, test(Pruned accuracy-test) and train accuracy(Pruned accuracy-train) are recorded. Each of these four metrics are shown in the graph above. 
+
+It can be seen that for most of the split values less than 5, the training accuracy is 1 for both pruned and unpruned trees. Whereas the test accuracy is less for both pruned and unpruned trees. This is a clear indication of overfitting. This is one reason to choose a value greater than or equal to 5. After 6, the training accuracy decreases(for both pruned and unpruned trees), so does the test accuracy. From 7 to 12, the test accuracy for the pruned tree fluctuates and hence unreliable. It goes down below 83% for larger values of min-split. 
+
+It is better to choose the min-split value between 5, and 6. Below, I have selected the min-split value for 5. 
+```{r}
+model.control <- rpart.control(minsplit = 5, xval = 20, cp = 0)
+fit <- rpart(Response ~., data = train, method = "class", control = model.control)
+rpart.plot(fit)
+```
+
+
+This is an unpruned tree with a min-split value of 5. 
+
+```{r}
+min_cp = which.min(fit$cptable[, 4])
+plot(fit$cptable[, 4], main = "Cp for model selection", ylab = "cv error")
+```
+
+```{r}
+print(paste("The minimum cp value from the graph is:", min_cp))
+```
+
+
+This value can be used to prune the tree. The tree shown below is result after passing into the prune function. It can be seen that no pruning has been done. 
+
+
+```{r}
+pruned_fit <- prune(fit, cp = fit$cptable[min_cp, 1])
+rpart.plot(pruned_fit)
+```
+
+
+### How  many testing  samples  fall  into  each  node?
+There are 6 left-nodes in all. There is 1 node that classifies 44 1's correctly. It also classifies a 2 as a one. THere are three nodes that are designated for 2's. Two of those are pure nodes, with two correct classifications. The third class-2 node classifies 47 2's correctly and one three incorrectly as a two. There are two nodes with class-3. Both of them are pure nodes. One of them classifies 4 three's correctly and the other classifies 23% data correctly.
+
+The main seperator node is Proline. If proline is greater than 754, then flavanoids are used to split the data. If flavenoids are greater than 2.2, then the data point belongs to class 1. Else, malic acid is used as a seperator. If malic acid is greater than 2.1, then the data is classified in class 2, else in class 3. 
+
+If proline is less than 755, OD280/OD315 is used as a separator. If it is greater than 2.2, then the data point is classified to be 2. Else Alcalinity of ash is used as a separator. If it is less than 17, then we can be 100% certain that the data point belongs to class 2. If it is greater or equal to 17, the data point belongs to class 3.
+
+
